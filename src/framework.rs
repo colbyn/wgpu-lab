@@ -11,10 +11,10 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use either::Either;
 
-pub fn cast_slice<T>(data: &[T]) -> &[u8] {
-    use std::{mem::size_of, slice::from_raw_parts};
-    unsafe { from_raw_parts(data.as_ptr() as *const u8, data.len() * size_of::<T>()) }
-}
+
+///////////////////////////////////////////////////////////////////////////////
+// BASICS
+///////////////////////////////////////////////////////////////////////////////
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -107,6 +107,10 @@ impl Shaders {
         }
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// APPLICATION
+///////////////////////////////////////////////////////////////////////////////
 
 pub struct Application {
     bundle: wgpu::RenderBundle,
@@ -275,55 +279,6 @@ impl Application {
         }
     }
 
-    fn resize(
-        &mut self,
-        sc_desc: &wgpu::SwapChainDescriptor,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
-        let global_uniforms: GlobalUniforms = GlobalUniforms {
-            viewport: [sc_desc.width as f32, sc_desc.height as f32],
-        };
-        self.uniform_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Uniform Buffer"),
-                contents: bytemuck::cast_slice(&[global_uniforms]),
-                usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-            }
-        );
-        let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStage::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }
-            ],
-            label: Some("uniform_bind_group_layout"),
-        });
-        self.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &uniform_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.uniform_buffer.as_entire_binding(),
-                }
-            ],
-            label: Some("uniform_bind_group"),
-        });
-        self.sc_desc = sc_desc.clone();
-        self.multisampled_framebuffer = Application::create_multisampled_framebuffer(
-            device,
-            sc_desc,
-            self.sample_count
-        );
-    }
-
     fn render(
         &mut self,
         frame: &wgpu::SwapChainTexture,
@@ -466,6 +421,10 @@ impl Application {
             .create_view(&wgpu::TextureViewDescriptor::default())
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// SETUP
+///////////////////////////////////////////////////////////////////////////////
 
 struct Setup {
     window: winit::window::Window,
@@ -620,11 +579,30 @@ fn start(setup: Setup) {
                 }
             }
             event::Event::WindowEvent {event: WindowEvent::Resized(size), ..} => {
-                log::info!("Resizing to {:?}", size);
                 sc_desc.width = if size.width == 0 { 1 } else { size.width };
                 sc_desc.height = if size.height == 0 { 1 } else { size.height };
-                app.resize(&sc_desc, &device, &queue);
-                swap_chain = device.create_swap_chain(&surface, &sc_desc);
+                
+                // app.resize(&sc_desc, &device, &queue);
+                // swap_chain = device.create_swap_chain(&surface, &sc_desc);
+
+                let frame = match swap_chain.get_current_frame() {
+                    Ok(frame) => frame,
+                    Err(_) => {
+                        swap_chain = device.create_swap_chain(&surface, &sc_desc);
+                        swap_chain
+                            .get_current_frame()
+                            .expect("Failed to acquire next swap chain texture!")
+                    }
+                };
+
+                app.sc_desc = sc_desc.clone();
+                // app.multisampled_framebuffer = Application::create_multisampled_framebuffer(
+                //     &device,
+                //     &sc_desc,
+                //     app.sample_count
+                // );
+
+                app.render(&frame.output, &device, &queue, &spawner);
             }
             event::Event::WindowEvent { event, .. } => match event {
                 WindowEvent::KeyboardInput {
@@ -662,6 +640,10 @@ fn start(setup: Setup) {
 }
 
 
+///////////////////////////////////////////////////////////////////////////////
+// ASYNC RUNTIME
+///////////////////////////////////////////////////////////////////////////////
+
 pub struct Spawner<'a> {
     executor: async_executor::LocalExecutor<'a>,
 }
@@ -683,6 +665,10 @@ impl<'a> Spawner<'a> {
         while self.executor.try_tick() {}
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// ENTRYPOINT
+///////////////////////////////////////////////////////////////////////////////
 
 pub fn run(title: &str) {
     start(pollster::block_on(setup(title)));
