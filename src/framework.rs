@@ -109,16 +109,54 @@ impl Shaders {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// GEOMETRY
+///////////////////////////////////////////////////////////////////////////////
+
+pub struct Geometry {
+    vertex_buffer: wgpu::Buffer,
+    vertices: Vec<Vertex>,
+}
+
+impl Geometry {
+    pub fn vertex_count(&self) -> usize {
+        self.vertices.len()
+    }
+    pub fn new(device: &wgpu::Device) -> Self {
+        let vertices: Vec<Vertex> = vec![
+            Vertex::new(-1.0, 1.0),
+            Vertex::new(-1.0, -1.0),
+            Vertex::new(1.0, 1.0),
+
+            Vertex::new(-1.0 * 0.6 + 0.25, 1.0 * 0.6),
+            Vertex::new(-1.0 * 0.6 + 0.25, -1.0 * 0.6),
+            Vertex::new(1.0 * 0.6 + 0.25, 1.0 * 0.6),
+        ];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(vertices.as_slice()),
+            usage: wgpu::BufferUsage::VERTEX,
+        });
+
+        Geometry {
+            vertex_buffer,
+            vertices,
+        }
+    }
+
+}
+
+
+
+///////////////////////////////////////////////////////////////////////////////
 // APPLICATION
 ///////////////////////////////////////////////////////////////////////////////
 
 pub struct Application {
-    bundle: wgpu::RenderBundle,
     shaders: Shaders,
     pipeline_layout: wgpu::PipelineLayout,
     multisampled_framebuffer: wgpu::TextureView,
-    vertex_buffer: wgpu::Buffer,
-    vertex_count: u32,
+    geometry: Geometry,
     sample_count: u32,
     rebuild_bundle: bool,
     sc_desc: wgpu::SwapChainDescriptor,
@@ -197,23 +235,9 @@ impl Application {
             sc_desc,
             sample_count
         );
-        
-        const VERTICES: &[Vertex] = &[
-            Vertex::new(-1.0, 1.0),
-            Vertex::new(-1.0, -1.0),
-            Vertex::new(1.0, 1.0),
 
-            Vertex::new(-1.0 * 0.6 + 0.25, 1.0 * 0.6),
-            Vertex::new(-1.0 * 0.6 + 0.25, -1.0 * 0.6),
-            Vertex::new(1.0 * 0.6 + 0.25, 1.0 * 0.6),
-        ];
+        let geometry = Geometry::new(&device);
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsage::VERTEX,
-        });
-        let vertex_count = VERTICES.len() as u32;
         let shaders = Shaders{
             vertex: Shader{
                 module: vs_module,
@@ -225,79 +249,33 @@ impl Application {
             },
         };
 
-        let bundle = Application::create_bundle(
-            device,
-            &sc_desc,
-            &shaders,
-            &pipeline_layout,
-            sample_count,
-            &vertex_buffer,
-            vertex_count,
-            &uniform_buffer,
-            &uniform_bind_group,
-        );
-
-        Application {
-            bundle,
+        let app = Application {
             shaders: shaders,
             pipeline_layout,
             multisampled_framebuffer,
-            vertex_buffer,
-            vertex_count,
+            geometry,
             sample_count,
             rebuild_bundle: true,
             sc_desc: sc_desc.clone(),
             uniform_buffer,
             uniform_bind_group,
-        }
-    }
-
-    fn update(&mut self, event: winit::event::WindowEvent) {
-        match event {
-            winit::event::WindowEvent::KeyboardInput { input, .. } => {
-                if let winit::event::ElementState::Pressed = input.state {
-                    match input.virtual_keycode {
-                        // TODO: Switch back to full scans of possible options when we expose
-                        //       supported sample counts to the user.
-                        // Some(winit::event::VirtualKeyCode::Left) => {
-                        //     if self.sample_count == 4 {
-                        //         self.sample_count = 1;
-                        //         self.rebuild_bundle = true;
-                        //     }
-                        // }
-                        // Some(winit::event::VirtualKeyCode::Right) => {
-                        //     if self.sample_count == 1 {
-                        //         self.sample_count = 4;
-                        //         self.rebuild_bundle = true;
-                        //     }
-                        // }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
+        };
+        app
     }
 
     fn render(
         &mut self,
+        bundle: &mut wgpu::RenderBundle,
         frame: &wgpu::SwapChainTexture,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _spawner: &Spawner,
     ) {
+        ///////////////////////////////////////////////////////////////////////
+        // INIT
+        ///////////////////////////////////////////////////////////////////////
         if self.rebuild_bundle {
-            self.bundle = Application::create_bundle(
-                device,
-                &self.sc_desc,
-                &self.shaders,
-                &self.pipeline_layout,
-                self.sample_count,
-                &self.vertex_buffer,
-                self.vertex_count,
-                &self.uniform_buffer,
-                &self.uniform_bind_group,
-            );
+            *bundle = self.create_bundle(device);
             self.multisampled_framebuffer = Application::create_multisampled_framebuffer(
                 device,
                 &self.sc_desc,
@@ -330,29 +308,21 @@ impl Application {
                 ops,
             }
         };
-        encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[rpass_color_attachment],
-                depth_stencil_attachment: None,
-            })
-            .execute_bundles(iter::once(&self.bundle));
 
+        ///////////////////////////////////////////////////////////////////////
+        // FINALIZE
+        ///////////////////////////////////////////////////////////////////////
+        let bundle: &wgpu::RenderBundle = &bundle;
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[rpass_color_attachment],
+            depth_stencil_attachment: None,
+        }).execute_bundles(iter::once(bundle));
         queue.submit(iter::once(encoder.finish()));
     }
-    fn create_bundle(
-        device: &wgpu::Device,
-        sc_desc: &wgpu::SwapChainDescriptor,
-        shaders: &Shaders,
-        pipeline_layout: &wgpu::PipelineLayout,
-        sample_count: u32,
-        vertex_buffer: &wgpu::Buffer,
-        vertex_count: u32,
-        uniform_buffer: &wgpu::Buffer,
-        uniform_bind_group: &wgpu::BindGroup,
-    ) -> wgpu::RenderBundle {
+    fn create_bundle(&self, device: &wgpu::Device) -> wgpu::RenderBundle {
         let color_target_state = &[wgpu::ColorTargetState {
-            format: sc_desc.format,
+            format: self.sc_desc.format,
             color_blend: wgpu::BlendState {
                 src_factor: wgpu::BlendFactor::SrcAlpha,
                 dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
@@ -367,9 +337,9 @@ impl Application {
         }];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
-            layout: Some(&pipeline_layout),
-            vertex: shaders.to_vertex_state(),
-            fragment: Some(shaders.to_fragment_state(color_target_state)),
+            layout: Some(&self.pipeline_layout),
+            vertex: self.shaders.to_vertex_state(),
+            fragment: Some(self.shaders.to_fragment_state(color_target_state)),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 front_face: wgpu::FrontFace::Ccw,
@@ -377,20 +347,20 @@ impl Application {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
-                count: sample_count,
+                count: self.sample_count,
                 ..Default::default()
             },
         });
         let mut encoder = device.create_render_bundle_encoder(&wgpu::RenderBundleEncoderDescriptor {
             label: None,
-            color_formats: &[sc_desc.format],
+            color_formats: &[self.sc_desc.format],
             depth_stencil_format: None,
-            sample_count,
+            sample_count: self.sample_count,
         });
         encoder.set_pipeline(&pipeline);
-        encoder.set_vertex_buffer(0, vertex_buffer.slice(..));
-        encoder.set_bind_group(0, &uniform_bind_group, &[]);
-        encoder.draw(0..vertex_count, 0..1);
+        encoder.set_vertex_buffer(0, self.geometry.vertex_buffer.slice(..));
+        encoder.set_bind_group(0, &self.uniform_bind_group, &[]);
+        encoder.draw(0 .. self.geometry.vertex_count() as u32, 0..1);
         encoder.finish(&wgpu::RenderBundleDescriptor {
             label: Some("main"),
         })
@@ -438,49 +408,12 @@ struct Setup {
 }
 
 async fn setup(title: &str) -> Setup {
-    let chrome_tracing_dir = std::env::var("WGPU_CHROME_TRACE");
-    wgpu_subscriber::initialize_default_subscriber(
-        chrome_tracing_dir.as_ref().map(std::path::Path::new).ok(),
-    );
-
     let event_loop = EventLoop::new();
     let mut builder = winit::window::WindowBuilder::new();
     builder = builder.with_title(title);
-    #[cfg(windows_OFF)] // TODO
-    {
-        use winit::platform::windows::WindowBuilderExtWindows;
-        builder = builder.with_no_redirection_bitmap(true);
-    }
     let window = builder.build(&event_loop).unwrap();
-    
-    let backend = if let Ok(backend) = std::env::var("WGPU_BACKEND") {
-        match backend.to_lowercase().as_str() {
-            "vulkan" => wgpu::BackendBit::VULKAN,
-            "metal" => wgpu::BackendBit::METAL,
-            "dx12" => wgpu::BackendBit::DX12,
-            "dx11" => wgpu::BackendBit::DX11,
-            "gl" => wgpu::BackendBit::GL,
-            "webgpu" => wgpu::BackendBit::BROWSER_WEBGPU,
-            other => panic!("Unknown backend: {}", other),
-        }
-    } else {
-        wgpu::BackendBit::PRIMARY
-    };
-    // TODO
     let backend = wgpu::BackendBit::METAL;
-    //  ^^^^^^
-    let power_preference = if let Ok(power_preference) = std::env::var("WGPU_POWER_PREF") {
-        match power_preference.to_lowercase().as_str() {
-            "low" => wgpu::PowerPreference::LowPower,
-            "high" => wgpu::PowerPreference::HighPerformance,
-            other => panic!("Unknown power preference: {}", other),
-        }
-    } else {
-        wgpu::PowerPreference::default()
-    };
-    // TODO
     let power_preference = wgpu::PowerPreference::LowPower;
-    //  ^^^^^^^^^^^^^^^^
     let instance = wgpu::Instance::new(backend);
     let (size, surface) = unsafe {
         let size = window.inner_size();
@@ -534,6 +467,10 @@ async fn setup(title: &str) -> Setup {
     }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// INGRESS - START
+///////////////////////////////////////////////////////////////////////////////
+
 fn start(setup: Setup) {
     let Setup {window, event_loop, instance, size, surface, adapter, device, queue} = setup;
     let spawner = Spawner::new();
@@ -546,45 +483,77 @@ fn start(setup: Setup) {
     };
     let mut swap_chain = device.create_swap_chain(&surface, &sc_desc);
     let mut app = Application::init(&sc_desc, &adapter, &device, &queue);
+    let mut bundle = app.create_bundle(&device);
     let mut last_update_inst = Instant::now();
 
+    ///////////////////////////////////////////////////////////////////////////
+    // EVENT LOOP
+    ///////////////////////////////////////////////////////////////////////////
     event_loop.run(move |event, _, control_flow| {
         let _ = (&instance, &adapter); // force ownership by the closure
-        *control_flow = if cfg!(feature = "metal-auto-capture") {
-            ControlFlow::Exit
-        } else {
-            ControlFlow::Poll
+        *control_flow = {
+            if cfg!(feature = "metal-auto-capture") {
+                ControlFlow::Exit
+            } else {
+                ControlFlow::Poll
+            }
         };
-        match event {
-            event::Event::MainEventsCleared => {
-                {
-                    // Clamp to some max framerate to avoid busy-looping too much
-                    // (we might be in wgpu::PresentMode::Mailbox, thus discarding superfluous frames)
-                    //
-                    // winit has window.current_monitor().video_modes() but that is a list of all full screen video modes.
-                    // So without extra dependencies it's a bit tricky to get the max refresh rate we can run the window on.
-                    // Therefore we just go with 60fps - sorry 120hz+ folks!
-                    let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
-                    let time_since_last_frame = last_update_inst.elapsed();
-                    if time_since_last_frame >= target_frametime {
-                        window.request_redraw();
-                        last_update_inst = Instant::now();
-                    } else {
-                        *control_flow = ControlFlow::WaitUntil(
-                            Instant::now() + target_frametime - time_since_last_frame,
-                        );
-                    }
-
-                    spawner.run_until_stalled();
+        ///////////////////////////////////////////////////////////////////////
+        // EVENT LOOP HELPERS
+        ///////////////////////////////////////////////////////////////////////
+        let is_exit_window_event = |event: &WindowEvent| -> bool {
+            match event {
+                WindowEvent::KeyboardInput {
+                    input:
+                        event::KeyboardInput {
+                            virtual_keycode: Some(event::VirtualKeyCode::Escape),
+                            state: event::ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => {
+                    true
+                }
+                WindowEvent::CloseRequested => {
+                    true
+                }
+                _ => {
+                    false
                 }
             }
+        };
+        ///////////////////////////////////////////////////////////////////////
+        // EVENTS
+        ///////////////////////////////////////////////////////////////////////
+        match event {
+            ///////////////////////////////////////////////////////////////////
+            // PRE-DRAW - REDRAW PROCESSING IS ABOUT TO BEGIN
+            ///////////////////////////////////////////////////////////////////
+            event::Event::MainEventsCleared => {
+                // Clamp to some max framerate to avoid busy-looping too much
+                // (we might be in wgpu::PresentMode::Mailbox, thus discarding superfluous frames)
+                //
+                // winit has window.current_monitor().video_modes() but that is a list of all full screen video modes.
+                // So without extra dependencies it's a bit tricky to get the max refresh rate we can run the window on.
+                // Therefore we just go with 60fps - sorry 120hz+ folks!
+                let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
+                let time_since_last_frame = last_update_inst.elapsed();
+                if time_since_last_frame >= target_frametime {
+                    window.request_redraw();
+                    last_update_inst = Instant::now();
+                } else {
+                    *control_flow = ControlFlow::WaitUntil(
+                        Instant::now() + target_frametime - time_since_last_frame,
+                    );
+                }
+                spawner.run_until_stalled();
+            }
+            ///////////////////////////////////////////////////////////////////
+            // RESIZE WINDOW EVENT
+            ///////////////////////////////////////////////////////////////////
             event::Event::WindowEvent {event: WindowEvent::Resized(size), ..} => {
                 sc_desc.width = if size.width == 0 { 1 } else { size.width };
                 sc_desc.height = if size.height == 0 { 1 } else { size.height };
-                
-                // app.resize(&sc_desc, &device, &queue);
-                // swap_chain = device.create_swap_chain(&surface, &sc_desc);
-
                 let frame = match swap_chain.get_current_frame() {
                     Ok(frame) => frame,
                     Err(_) => {
@@ -594,33 +563,22 @@ fn start(setup: Setup) {
                             .expect("Failed to acquire next swap chain texture!")
                     }
                 };
-
                 app.sc_desc = sc_desc.clone();
-                // app.multisampled_framebuffer = Application::create_multisampled_framebuffer(
-                //     &device,
-                //     &sc_desc,
-                //     app.sample_count
-                // );
-
-                app.render(&frame.output, &device, &queue, &spawner);
+                // app.render(&frame.output, &device, &queue, &spawner);
+                app.render(&mut bundle, &frame.output, &device, &queue, &spawner);
             }
+            ///////////////////////////////////////////////////////////////////
+            // GENERAL WINDOW EVENT
+            ///////////////////////////////////////////////////////////////////
             event::Event::WindowEvent { event, .. } => match event {
-                WindowEvent::KeyboardInput {
-                    input:
-                        event::KeyboardInput {
-                            virtual_keycode: Some(event::VirtualKeyCode::Escape),
-                            state: event::ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                }
-                | WindowEvent::CloseRequested => {
+                e if is_exit_window_event(&e) => {
                     *control_flow = ControlFlow::Exit;
                 }
-                _ => {
-                    app.update(event);
-                }
+                _ => {}
             },
+            ///////////////////////////////////////////////////////////////////
+            // REDRAW
+            ///////////////////////////////////////////////////////////////////
             event::Event::RedrawRequested(_) => {
                 let frame = match swap_chain.get_current_frame() {
                     Ok(frame) => frame,
@@ -631,9 +589,11 @@ fn start(setup: Setup) {
                             .expect("Failed to acquire next swap chain texture!")
                     }
                 };
-
-                app.render(&frame.output, &device, &queue, &spawner);
+                app.render(&mut bundle, &frame.output, &device, &queue, &spawner);
             }
+            ///////////////////////////////////////////////////////////////////
+            // NOTHING TO DO
+            ///////////////////////////////////////////////////////////////////
             _ => {}
         }
     });

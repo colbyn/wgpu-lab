@@ -8,8 +8,6 @@ layout(set=0, binding=0) uniform Uniforms {
 };
 
 
-
-
 void main() {
     vec2 frame = gl_FragCoord.xy/viewport;
     if (frame.x <= 0.5) {
