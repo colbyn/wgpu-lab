@@ -1,0 +1,29 @@
+[package]
+name = "wgpu-lab"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+winit = "0.24.0"
+bytemuck = {version = "1.4", features = ["derive"]}
+cgmath = "0.18.0"
+futures = "0.3.14"
+async-executor = "1.4.0"
+wgpu-subscriber = "0.1.0"
+pollster = "0.2.3"
+log = "0.4.14"
+either = "1.6.1"
+
+[dependencies.wgpu]
+version = "0.7"
+# features = ["vulkan-portability"]
+
+# [profile.release]
+# opt-level = 3
+
+# NEW!
+[build-dependencies]
+anyhow = "1.0"
+fs_extra = "1.1"
+glob = "0.3"
+shaderc = "0.7"
