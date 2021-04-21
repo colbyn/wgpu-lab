@@ -108,7 +108,7 @@ impl Shaders {
     }
 }
 
-pub struct Example {
+pub struct Application {
     bundle: wgpu::RenderBundle,
     shaders: Shaders,
     pipeline_layout: wgpu::PipelineLayout,
@@ -122,7 +122,7 @@ pub struct Example {
     uniform_bind_group: wgpu::BindGroup,
 }
 
-impl Example {
+impl Application {
     fn optional_features() -> wgpu::Features {
         wgpu::Features::empty()
     }
@@ -188,7 +188,7 @@ impl Example {
             push_constant_ranges: &[],
         });
 
-        let multisampled_framebuffer = Example::create_multisampled_framebuffer(
+        let multisampled_framebuffer = Application::create_multisampled_framebuffer(
             device,
             sc_desc,
             sample_count
@@ -221,7 +221,7 @@ impl Example {
             },
         };
 
-        let bundle = Example::create_bundle(
+        let bundle = Application::create_bundle(
             device,
             &sc_desc,
             &shaders,
@@ -233,7 +233,7 @@ impl Example {
             &uniform_bind_group,
         );
 
-        Example {
+        Application {
             bundle,
             shaders: shaders,
             pipeline_layout,
@@ -317,7 +317,7 @@ impl Example {
             label: Some("uniform_bind_group"),
         });
         self.sc_desc = sc_desc.clone();
-        self.multisampled_framebuffer = Example::create_multisampled_framebuffer(
+        self.multisampled_framebuffer = Application::create_multisampled_framebuffer(
             device,
             sc_desc,
             self.sample_count
@@ -332,7 +332,7 @@ impl Example {
         _spawner: &Spawner,
     ) {
         if self.rebuild_bundle {
-            self.bundle = Example::create_bundle(
+            self.bundle = Application::create_bundle(
                 device,
                 &self.sc_desc,
                 &self.shaders,
@@ -343,7 +343,7 @@ impl Example {
                 &self.uniform_buffer,
                 &self.uniform_bind_group,
             );
-            self.multisampled_framebuffer = Example::create_multisampled_framebuffer(
+            self.multisampled_framebuffer = Application::create_multisampled_framebuffer(
                 device,
                 &self.sc_desc,
                 self.sample_count
@@ -539,16 +539,16 @@ async fn setup(title: &str) -> Setup {
     let adapter_info = adapter.get_info();
     println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
 
-    let optional_features = Example::optional_features();
-    let required_features = Example::required_features();
+    let optional_features = Application::optional_features();
+    let required_features = Application::required_features();
     let adapter_features = adapter.features();
     assert!(
         adapter_features.contains(required_features),
-        "Adapter does not support required features for this example: {:?}",
+        "Adapter does not support required features for this app: {:?}",
         required_features - adapter_features
     );
 
-    let needed_limits = Example::required_limits();
+    let needed_limits = Application::required_limits();
 
     let trace_dir = std::env::var("WGPU_TRACE");
     let (device, queue) = adapter
@@ -586,14 +586,9 @@ fn start(setup: Setup) {
         present_mode: wgpu::PresentMode::Mailbox,
     };
     let mut swap_chain = device.create_swap_chain(&surface, &sc_desc);
-
-    log::info!("Initializing the example...");
-    let mut example = Example::init(&sc_desc, &adapter, &device, &queue);
-
-    #[cfg(not(target_arch = "wasm32"))]
+    let mut app = Application::init(&sc_desc, &adapter, &device, &queue);
     let mut last_update_inst = Instant::now();
 
-    log::info!("Entering render loop...");
     event_loop.run(move |event, _, control_flow| {
         let _ = (&instance, &adapter); // force ownership by the closure
         *control_flow = if cfg!(feature = "metal-auto-capture") {
@@ -624,14 +619,11 @@ fn start(setup: Setup) {
                     spawner.run_until_stalled();
                 }
             }
-            event::Event::WindowEvent {
-                event: WindowEvent::Resized(size),
-                ..
-            } => {
+            event::Event::WindowEvent {event: WindowEvent::Resized(size), ..} => {
                 log::info!("Resizing to {:?}", size);
                 sc_desc.width = if size.width == 0 { 1 } else { size.width };
                 sc_desc.height = if size.height == 0 { 1 } else { size.height };
-                example.resize(&sc_desc, &device, &queue);
+                app.resize(&sc_desc, &device, &queue);
                 swap_chain = device.create_swap_chain(&surface, &sc_desc);
             }
             event::Event::WindowEvent { event, .. } => match event {
@@ -648,7 +640,7 @@ fn start(setup: Setup) {
                     *control_flow = ControlFlow::Exit;
                 }
                 _ => {
-                    example.update(event);
+                    app.update(event);
                 }
             },
             event::Event::RedrawRequested(_) => {
@@ -662,7 +654,7 @@ fn start(setup: Setup) {
                     }
                 };
 
-                example.render(&frame.output, &device, &queue, &spawner);
+                app.render(&frame.output, &device, &queue, &spawner);
             }
             _ => {}
         }
