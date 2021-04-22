@@ -9,6 +9,7 @@
 #![allow(unused)]
 mod framework;
 mod render;
+mod utils;
 
 use std::{borrow::Cow, iter};
 use bytemuck::{Pod, Zeroable};

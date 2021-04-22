@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use std::sync::{Arc, Mutex};
+use std::borrow::{BorrowMut, Borrow};
 use std::future::Future;
 use std::time::{Duration, Instant};
 use winit::{
@@ -7,6 +9,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 use std::{borrow::Cow, iter};
+use crate::utils::floating_duration::TimeAsFloat;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use either::Either;
@@ -69,7 +72,12 @@ impl Shaders {
                             offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float3,
-                        }
+                        },
+                        // wgpu::VertexAttribute {
+                        //     offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+                        //     shader_location: 2,
+                        //     format: wgpu::VertexFormat::Float3,
+                        // },
                     ],
                 }
             ],
@@ -119,7 +127,7 @@ impl GlobalUniforms {
     }
     fn update(&mut self, sc_desc: &wgpu::SwapChainDescriptor, time: std::time::Duration) {
         self.viewport = [sc_desc.width as f32, sc_desc.height as f32];
-        self.time = time.as_secs() as f32;
+        self.time = time.as_fractional_secs() as f32;
     }
 }
 
@@ -174,8 +182,10 @@ pub struct Application {
     geometry: Geometry,
     sample_count: u32,
     sc_desc: wgpu::SwapChainDescriptor,
+    global_uniforms: GlobalUniforms,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+    uniform_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl Application {
@@ -188,6 +198,7 @@ impl Application {
     fn required_limits() -> wgpu::Limits {
         wgpu::Limits::default()
     }
+
 
     fn init(
         size: &winit::dpi::PhysicalSize<u32>,
@@ -261,15 +272,17 @@ impl Application {
             geometry: Geometry::new(&device),
             sample_count,
             sc_desc: sc_desc,
+            global_uniforms,
             uniform_buffer,
             uniform_bind_group,
+            uniform_bind_group_layout,
         };
         app
     }
 
     fn render(
         &mut self,
-        bundle: &mut wgpu::RenderBundle,
+        bundle: &wgpu::RenderBundle,
         frame: &wgpu::SwapChainTexture,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -476,6 +489,7 @@ fn start(setup: Setup) {
     let mut swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
     let mut bundle = app.create_bundle(&device);
     let mut last_update_inst = Instant::now();
+    let start_time = std::time::Instant::now();
 
     ///////////////////////////////////////////////////////////////////////////
     // EVENT LOOP
@@ -545,12 +559,41 @@ fn start(setup: Setup) {
             event::Event::WindowEvent {event: WindowEvent::Resized(size), ..} => {
                 app.sc_desc.width = if size.width == 0 { 1 } else { size.width };
                 app.sc_desc.height = if size.height == 0 { 1 } else { size.height };
+                app.global_uniforms.update(&app.sc_desc, start_time.elapsed());
+                app.uniform_buffer = device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("Uniform Buffer"),
+                        contents: bytemuck::cast_slice(&[app.global_uniforms]),
+                        usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+                    }
+                );
+                app.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &app.uniform_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: app.uniform_buffer.as_entire_binding(),
+                        }
+                    ],
+                    label: Some("uniform_bind_group"),
+                });
                 app.multisampled_framebuffer = Application::create_multisampled_framebuffer(
                     &device,
                     &app.sc_desc,
                     app.sample_count,
                 );
+                bundle = app.create_bundle(&device);
                 swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
+                let frame = match swap_chain.get_current_frame() {
+                    Ok(frame) => frame,
+                    Err(_) => {
+                        swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
+                        swap_chain
+                            .get_current_frame()
+                            .expect("Failed to acquire next swap chain texture!")
+                    }
+                };
+                app.render(&mut bundle, &frame.output, &device, &queue, &spawner);
             }
             ///////////////////////////////////////////////////////////////////
             // GENERAL WINDOW EVENT
@@ -565,6 +608,25 @@ fn start(setup: Setup) {
             // REDRAW
             ///////////////////////////////////////////////////////////////////
             event::Event::RedrawRequested(_) => {
+                app.global_uniforms.update(&app.sc_desc, start_time.elapsed());
+                app.uniform_buffer = device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("Uniform Buffer"),
+                        contents: bytemuck::cast_slice(&[app.global_uniforms]),
+                        usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+                    }
+                );
+                app.uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &app.uniform_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: app.uniform_buffer.as_entire_binding(),
+                        }
+                    ],
+                    label: Some("uniform_bind_group"),
+                });
+                bundle = app.create_bundle(&device);
                 let frame = match swap_chain.get_current_frame() {
                     Ok(frame) => frame,
                     Err(_) => {
