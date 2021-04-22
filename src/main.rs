@@ -8,6 +8,7 @@
 //! *   Vertices and Indices describe the two points that make up a line.
 #![allow(unused)]
 mod framework;
+mod render;
 
 use std::{borrow::Cow, iter};
 use bytemuck::{Pod, Zeroable};

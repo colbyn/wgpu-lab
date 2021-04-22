@@ -13,6 +13,7 @@ wgpu-subscriber = "0.1.0"
 pollster = "0.2.3"
 log = "0.4.14"
 either = "1.6.1"
+lyon = {version = "0.17.5", features=['extra']}
 
 [dependencies.wgpu]
 version = "0.7"

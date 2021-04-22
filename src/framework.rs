@@ -13,40 +13,8 @@ use either::Either;
 
 
 ///////////////////////////////////////////////////////////////////////////////
-// BASICS
+// SHADER PIPELINE
 ///////////////////////////////////////////////////////////////////////////////
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-struct Vertex {
-    pos: [f32; 3],
-    color: [f32; 3],
-}
-
-impl Vertex {
-    pub const fn new(x: f32, y: f32) -> Self {
-        Vertex{pos: [x, y, 0.0], color: [0.5, 0.0, 0.5]}
-    }
-}
-
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-struct GlobalUniforms {
-    viewport: [f32; 2],
-}
-
-impl GlobalUniforms {
-    fn new(sc_desc: &wgpu::SwapChainDescriptor) -> Self {
-        Self {
-            viewport: [sc_desc.width as f32, sc_desc.height as f32]
-        }
-    }
-
-    fn update(&mut self, sc_desc: &wgpu::SwapChainDescriptor) {
-        self.viewport = [sc_desc.width as f32, sc_desc.height as f32];
-    }
-}
 
 pub enum ShaderStage {
     Vertex,
@@ -65,6 +33,24 @@ pub struct Shaders {
 }
 
 impl Shaders {
+    pub fn load(device: &wgpu::Device) -> Self {
+        let vs_module = device.create_shader_module(&wgpu::include_spirv!(
+            "../shaders/shader.vert.spv"
+        ));
+        let fs_module = device.create_shader_module(&wgpu::include_spirv!(
+            "../shaders/shader.frag.spv"
+        ));
+        Shaders{
+            vertex: Shader{
+                module: vs_module,
+                entrypoint: String::from("main"),
+            },
+            fragment: Shader{
+                module: fs_module,
+                entrypoint: String::from("main"),
+            },
+        }
+    }
     pub fn to_vertex_state<'a>(&'a self) -> wgpu::VertexState<'a> {
         wgpu::VertexState {
             module: &self.vertex.module,
@@ -90,21 +76,50 @@ impl Shaders {
         }
     }
     pub fn to_fragment_state<'a>(&'a self, targets: &'a [wgpu::ColorTargetState]) -> wgpu::FragmentState<'a> {
-        let color_blend = wgpu::BlendState {
-            src_factor: wgpu::BlendFactor::SrcAlpha,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
-        };
-        let alpha_blend = wgpu::BlendState {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::One,
-            operation: wgpu::BlendOperation::Max,
-        };
         wgpu::FragmentState {
             module: &self.fragment.module,
             entry_point: &self.fragment.entrypoint,
             targets
         }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// SHADER INPUTS
+///////////////////////////////////////////////////////////////////////////////
+
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+struct Vertex {
+    pos: [f32; 3],
+    color: [f32; 3],
+}
+
+impl Vertex {
+    pub const fn new(x: f32, y: f32) -> Self {
+        Vertex{pos: [x, y, 0.0], color: [0.5, 0.0, 0.5]}
+    }
+}
+
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct GlobalUniforms {
+    viewport: [f32; 2],
+    time: f32,
+}
+
+impl GlobalUniforms {
+    fn new(sc_desc: &wgpu::SwapChainDescriptor) -> Self {
+        Self {
+            viewport: [sc_desc.width as f32, sc_desc.height as f32],
+            time: 0.0,
+        }
+    }
+    fn update(&mut self, sc_desc: &wgpu::SwapChainDescriptor, time: std::time::Duration) {
+        self.viewport = [sc_desc.width as f32, sc_desc.height as f32];
+        self.time = time.as_secs() as f32;
     }
 }
 
@@ -125,11 +140,11 @@ impl Geometry {
         let vertices: Vec<Vertex> = vec![
             Vertex::new(-1.0, 1.0),
             Vertex::new(-1.0, -1.0),
-            Vertex::new(1.0, 1.0),
+            Vertex::new(1.0, -1.0),
 
-            Vertex::new(-1.0 * 0.6 + 0.25, 1.0 * 0.6),
-            Vertex::new(-1.0 * 0.6 + 0.25, -1.0 * 0.6),
-            Vertex::new(1.0 * 0.6 + 0.25, 1.0 * 0.6),
+            Vertex::new(1.0, -1.0),
+            Vertex::new(1.0, 1.0),
+            Vertex::new(-1.0, 1.0),
         ];
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -158,7 +173,6 @@ pub struct Application {
     multisampled_framebuffer: wgpu::TextureView,
     geometry: Geometry,
     sample_count: u32,
-    rebuild_bundle: bool,
     sc_desc: wgpu::SwapChainDescriptor,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
@@ -176,12 +190,19 @@ impl Application {
     }
 
     fn init(
-        sc_desc: &wgpu::SwapChainDescriptor,
+        size: &winit::dpi::PhysicalSize<u32>,
+        surface: &wgpu::Surface,
         adapter: &wgpu::Adapter,
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
     ) -> Self {
-        let sample_count = 1;
+        let sc_desc = wgpu::SwapChainDescriptor {
+            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
+            format: adapter.get_swap_chain_preferred_format(&surface),
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Mailbox,
+        };
         let mut flags = wgpu::ShaderFlags::VALIDATION;
         match adapter.get_info().backend {
             wgpu::Backend::Metal | wgpu::Backend::Vulkan => {
@@ -189,16 +210,6 @@ impl Application {
             }
             _ => (), //TODO
         }
-        let vs_module = device.create_shader_module(&wgpu::include_spirv!("../shaders/shader.vert.spv"));
-        let fs_module = device.create_shader_module(&wgpu::include_spirv!("../shaders/shader.frag.spv"));
-        let global_uniforms: GlobalUniforms = GlobalUniforms::new(&sc_desc);
-        let uniform_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Uniform Buffer"),
-                contents: bytemuck::cast_slice(&[global_uniforms]),
-                usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-            }
-        );
         let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -214,6 +225,14 @@ impl Application {
             ],
             label: Some("uniform_bind_group_layout"),
         });
+        let global_uniforms: GlobalUniforms = GlobalUniforms::new(&sc_desc);
+        let uniform_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[global_uniforms]),
+                usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+            }
+        );
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
             entries: &[
@@ -229,34 +248,19 @@ impl Application {
             bind_group_layouts: &[&uniform_bind_group_layout],
             push_constant_ranges: &[],
         });
-
+        let sample_count = 1;
         let multisampled_framebuffer = Application::create_multisampled_framebuffer(
             device,
-            sc_desc,
+            &sc_desc,
             sample_count
         );
-
-        let geometry = Geometry::new(&device);
-
-        let shaders = Shaders{
-            vertex: Shader{
-                module: vs_module,
-                entrypoint: String::from("main"),
-            },
-            fragment: Shader{
-                module: fs_module,
-                entrypoint: String::from("main"),
-            },
-        };
-
         let app = Application {
-            shaders: shaders,
+            shaders: Shaders::load(&device),
             pipeline_layout,
             multisampled_framebuffer,
-            geometry,
+            geometry: Geometry::new(&device),
             sample_count,
-            rebuild_bundle: true,
-            sc_desc: sc_desc.clone(),
+            sc_desc: sc_desc,
             uniform_buffer,
             uniform_bind_group,
         };
@@ -274,15 +278,6 @@ impl Application {
         ///////////////////////////////////////////////////////////////////////
         // INIT
         ///////////////////////////////////////////////////////////////////////
-        if self.rebuild_bundle {
-            *bundle = self.create_bundle(device);
-            self.multisampled_framebuffer = Application::create_multisampled_framebuffer(
-                device,
-                &self.sc_desc,
-                self.sample_count
-            );
-            self.rebuild_bundle = false;
-        }
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {label: None}
         );
@@ -308,7 +303,6 @@ impl Application {
                 ops,
             }
         };
-
         ///////////////////////////////////////////////////////////////////////
         // FINALIZE
         ///////////////////////////////////////////////////////////////////////
@@ -321,20 +315,22 @@ impl Application {
         queue.submit(iter::once(encoder.finish()));
     }
     fn create_bundle(&self, device: &wgpu::Device) -> wgpu::RenderBundle {
-        let color_target_state = &[wgpu::ColorTargetState {
-            format: self.sc_desc.format,
-            color_blend: wgpu::BlendState {
-                src_factor: wgpu::BlendFactor::SrcAlpha,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-            alpha_blend: wgpu::BlendState {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::One,
-                operation: wgpu::BlendOperation::Max,
-            },
-            write_mask: wgpu::ColorWrite::ALL,
-        }];
+        let color_target_state = &[
+            wgpu::ColorTargetState {
+                format: self.sc_desc.format,
+                color_blend: wgpu::BlendState {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha_blend: wgpu::BlendState {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Max,
+                },
+                write_mask: wgpu::ColorWrite::ALL,
+            }
+        ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&self.pipeline_layout),
@@ -361,9 +357,7 @@ impl Application {
         encoder.set_vertex_buffer(0, self.geometry.vertex_buffer.slice(..));
         encoder.set_bind_group(0, &self.uniform_bind_group, &[]);
         encoder.draw(0 .. self.geometry.vertex_count() as u32, 0..1);
-        encoder.finish(&wgpu::RenderBundleDescriptor {
-            label: Some("main"),
-        })
+        encoder.finish(&wgpu::RenderBundleDescriptor {label: Some("main")})
     }
 
     fn create_multisampled_framebuffer(
@@ -474,15 +468,8 @@ async fn setup(title: &str) -> Setup {
 fn start(setup: Setup) {
     let Setup {window, event_loop, instance, size, surface, adapter, device, queue} = setup;
     let spawner = Spawner::new();
-    let mut sc_desc = wgpu::SwapChainDescriptor {
-        usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
-        format: adapter.get_swap_chain_preferred_format(&surface),
-        width: size.width,
-        height: size.height,
-        present_mode: wgpu::PresentMode::Mailbox,
-    };
-    let mut swap_chain = device.create_swap_chain(&surface, &sc_desc);
-    let mut app = Application::init(&sc_desc, &adapter, &device, &queue);
+    let mut app = Application::init(&size, &surface, &adapter, &device, &queue);
+    let mut swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
     let mut bundle = app.create_bundle(&device);
     let mut last_update_inst = Instant::now();
 
@@ -552,20 +539,18 @@ fn start(setup: Setup) {
             // RESIZE WINDOW EVENT
             ///////////////////////////////////////////////////////////////////
             event::Event::WindowEvent {event: WindowEvent::Resized(size), ..} => {
-                sc_desc.width = if size.width == 0 { 1 } else { size.width };
-                sc_desc.height = if size.height == 0 { 1 } else { size.height };
-                let frame = match swap_chain.get_current_frame() {
-                    Ok(frame) => frame,
-                    Err(_) => {
-                        swap_chain = device.create_swap_chain(&surface, &sc_desc);
-                        swap_chain
-                            .get_current_frame()
-                            .expect("Failed to acquire next swap chain texture!")
-                    }
-                };
-                app.sc_desc = sc_desc.clone();
-                // app.render(&frame.output, &device, &queue, &spawner);
-                app.render(&mut bundle, &frame.output, &device, &queue, &spawner);
+                // app.sc_desc.width = if size.width == 0 { 1 } else { size.width };
+                // app.sc_desc.height = if size.height == 0 { 1 } else { size.height };
+                // let frame = match swap_chain.get_current_frame() {
+                //     Ok(frame) => frame,
+                //     Err(_) => {
+                //         swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
+                //         swap_chain
+                //             .get_current_frame()
+                //             .expect("Failed to acquire next swap chain texture!")
+                //     }
+                // };
+                // app.render(&mut bundle, &frame.output, &device, &queue, &spawner);
             }
             ///////////////////////////////////////////////////////////////////
             // GENERAL WINDOW EVENT
@@ -583,7 +568,7 @@ fn start(setup: Setup) {
                 let frame = match swap_chain.get_current_frame() {
                     Ok(frame) => frame,
                     Err(_) => {
-                        swap_chain = device.create_swap_chain(&surface, &sc_desc);
+                        swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
                         swap_chain
                             .get_current_frame()
                             .expect("Failed to acquire next swap chain texture!")
