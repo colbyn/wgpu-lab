@@ -17,7 +17,7 @@ lyon = {version = "0.17.5", features=['extra']}
 
 [dependencies.wgpu]
 version = "0.7"
-# features = ["vulkan-portability"]
+features = ["vulkan-portability"]
 
 # [profile.release]
 # opt-level = 3

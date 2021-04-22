@@ -276,6 +276,10 @@ impl Application {
         _spawner: &Spawner,
     ) {
         ///////////////////////////////////////////////////////////////////////
+        // REBUILD RENDER BUNDLE
+        ///////////////////////////////////////////////////////////////////////
+        
+        ///////////////////////////////////////////////////////////////////////
         // INIT
         ///////////////////////////////////////////////////////////////////////
         let mut encoder = device.create_command_encoder(
@@ -539,18 +543,14 @@ fn start(setup: Setup) {
             // RESIZE WINDOW EVENT
             ///////////////////////////////////////////////////////////////////
             event::Event::WindowEvent {event: WindowEvent::Resized(size), ..} => {
-                // app.sc_desc.width = if size.width == 0 { 1 } else { size.width };
-                // app.sc_desc.height = if size.height == 0 { 1 } else { size.height };
-                // let frame = match swap_chain.get_current_frame() {
-                //     Ok(frame) => frame,
-                //     Err(_) => {
-                //         swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
-                //         swap_chain
-                //             .get_current_frame()
-                //             .expect("Failed to acquire next swap chain texture!")
-                //     }
-                // };
-                // app.render(&mut bundle, &frame.output, &device, &queue, &spawner);
+                app.sc_desc.width = if size.width == 0 { 1 } else { size.width };
+                app.sc_desc.height = if size.height == 0 { 1 } else { size.height };
+                app.multisampled_framebuffer = Application::create_multisampled_framebuffer(
+                    &device,
+                    &app.sc_desc,
+                    app.sample_count,
+                );
+                swap_chain = device.create_swap_chain(&surface, &app.sc_desc);
             }
             ///////////////////////////////////////////////////////////////////
             // GENERAL WINDOW EVENT

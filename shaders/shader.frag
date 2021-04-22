@@ -223,7 +223,7 @@ float plot(vec2 st) {
     return smoothstep(0.06, 0.0, abs(st.y - st.x));
 }
 
-void curve_main() {
+void main() {
     const float max_width = viewport.x;
     const float max_height = viewport.y;
     const float x_pos = gl_FragCoord.x;
@@ -264,10 +264,10 @@ void curve_main() {
     // color = mix(vec3(1.0,0.0,0.0), color, smoothstep(0.01,0.01+px,distance(cp0, st)));
     // color = mix(vec3(1.0,0.0,0.0), color, smoothstep(0.01,0.01+px,distance(cp1, st)));)
 
-    // if (x_pos >= max_width / 2 && y_pos >= max_height / 2) {
-    //     f_color = vec4(0.0, 0.0, 0.0, 1.0);
-    //     return;
-    // }
+    if (x_pos >= max_width / 2 && y_pos >= max_height / 2) {
+        f_color = vec4(1.0, 1.0, 1.0, 1.0);
+        return;
+    }
     
     // f_color = vec4(color, 1.0);
 
@@ -279,31 +279,31 @@ void curve_main() {
 #define PCT_TO_WIDTH_SCALE(a) linear_scale(vec2(0.0, 100.0), vec2(0.0, viewport.x), a)
 // #define PCT_TO_HEIGHT_SCALE(a) linear_scale(vec2(0.0, 100.0), vec2(0.0, viewport.y), a)
 
-void main() {
-    const float max_width = viewport.x;
-    const float max_height = viewport.y;
-    const float x = gl_FragCoord.x;
-    const float y = gl_FragCoord.y;
-    // const float m = max_height/max_width;
-    // const float mx = m * x;
-    // const vec2 st = gl_FragCoord.xy/viewport;
-    // const float radius = max_width / 4;
-    // const bool on_line_top = y <= radius * sin((1/radius) * x);
-    // // const bool on_line_bot = y + radius >= (10/1) * sin(10 * x);
-    // // if (on_line_top) {
-    // //     f_color = vec4(1.0, 1.0, 1.0, 1.0);
-    // //     return;
-    // // }
-    // if (time >= 1.0) {
-    //     f_color = vec4(0.5, 1.0, 0.5, 1.0);
-    //     return ;
-    // }
+// void main() {
+//     const float max_width = viewport.x;
+//     const float max_height = viewport.y;
+//     const float x = gl_FragCoord.x;
+//     const float y = gl_FragCoord.y;
+//     // const float m = max_height/max_width;
+//     // const float mx = m * x;
+//     // const vec2 st = gl_FragCoord.xy/viewport;
+//     // const float radius = max_width / 4;
+//     // const bool on_line_top = y <= radius * sin((1/radius) * x);
+//     // // const bool on_line_bot = y + radius >= (10/1) * sin(10 * x);
+//     // // if (on_line_top) {
+//     // //     f_color = vec4(1.0, 1.0, 1.0, 1.0);
+//     // //     return;
+//     // // }
+//     // if (time >= 1.0) {
+//     //     f_color = vec4(0.5, 1.0, 0.5, 1.0);
+//     //     return ;
+//     // }
 
-    if (x >= 800.0) {
-        f_color = vec4(0.5, 1.0, 0.5, 1.0);
-        return ;
-    }
+//     if (x >= 800.0) {
+//         f_color = vec4(0.5, 1.0, 0.5, 1.0);
+//         return ;
+//     }
 
-    f_color = vec4(0.5, 0.5, 0.5, 1.0);
-}
+//     f_color = vec4(0.5, 0.5, 0.5, 1.0);
+// }
 
